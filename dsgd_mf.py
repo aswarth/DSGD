@@ -35,8 +35,7 @@ def computeGradient(block):
     	return (Wmini, Hmini, blockEntryRow, blockExitRow, blockEntryCol, blockExitCol, globalIter + iteration)
 	
     iteration = 0
-    #prevLoss = -1.0
-    
+
     while iteration < total:
         #randomIndex = random.randint(0, total-1)        # Get a random rating
         r = rowZ[iteration]
@@ -54,15 +53,7 @@ def computeGradient(block):
         H += (learningRate * temp * Wmini[r, :].T) - (2.0 * learningRate * (lambdaValue/vcnonzeros) * H)
         Wmini[r, :] = W                                     # Updating W[i, :]
         Hmini[:, c] = H                                     # Updating H[:, j]
-        #loss = Vmini[rowZ, colZ] - (Wmini.dot(Hmini)[rowZ, colZ])   
-        #loss = dotProduct(loss) + lambdaValue * (dotProduct(Wmini) + dotProduct(Hmini)) # Computing the loss function
-        #if np.fabs(prevLoss - loss) < 0.0001:              # If the loss between previous and current run is less than
-         #   break                                           # 1e-5 then break
-        #else:                                               # else set the previous loss to current loss
-         #   prevLoss = loss
         iteration += 1
-        #if iteration == total:                               # Maximum number of SGD iterations for each run
-        #    break                   
     
     # Return the updated metadata
     return (Wmini, Hmini, blockEntryRow, blockExitRow, blockEntryCol, blockExitCol, globalIter + iteration)
