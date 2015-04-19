@@ -8,22 +8,13 @@ from pyspark import SparkContext, SparkConf
 '''
     Loads the data into a sparse matrix and returns it
 '''
-def LoadSparseMatrix(csvfile):
-        vals = []
-        rows = []
-        cols = []
-        select = []
-        f = open(csvfile)
-        reader = csv.reader(f)
-        for line in reader:             # For each line
-            row = int(line[0]) - 1      # userId
-            col = int(line[1]) - 1      # movieId
-            rows.append(row)    
-            cols.append(col)
-            vals.append(float(line[2])) # Rating
-            select.append((row, col))   # Required while computing normalized mean square error
-           
-        return sps.csr_matrix( (vals, (rows, cols))), select
+def LoadSparseMatrix(ratingsFile):
+	tArray = np.loadtxt(ratingsFile, delimiter=",", usecols=(0, 1, 2))	# Consider only first three columns
+	(row, col, val) = (tArray[:, 0] - 1, tArray[:, 1] - 1, tArray[:, 2])
+	rsize = np.max(row) + 1	# Row size
+	csize = np.max(col) + 1	# Column size
+	return sps.csr_matrix((val, (row, col)), shape=(rsize, csize), dtype=float)
+
 '''
     Computes the dot product of two vectors or matrices
 '''
@@ -40,12 +31,16 @@ def computeGradient(block):
     rowZ, colZ = Vmini.nonzero()                        # Getting the non-zero values
 
     total = rowZ.size 
+    if total == 0:
+    	return (Wmini, Hmini, blockEntryRow, blockExitRow, blockEntryCol, blockExitCol, globalIter + iteration)
+	
     iteration = 0
-    prevLoss = -1.0
-    while True and total > 0:
-        randomIndex = random.randint(0, total-1)        # Get a random rating
-        r = rowZ[randomIndex]
-        c = colZ[randomIndex]
+    #prevLoss = -1.0
+    
+    while iteration < total:
+        #randomIndex = random.randint(0, total-1)        # Get a random rating
+        r = rowZ[iteration]
+        c = colZ[iteration]
         W = Wmini[r, :]
         H = Hmini[:, c]
         learningRate = math.pow((100 + globalIter +  iteration), -betaValue)
@@ -59,15 +54,15 @@ def computeGradient(block):
         H += (learningRate * temp * Wmini[r, :].T) - (2.0 * learningRate * (lambdaValue/vcnonzeros) * H)
         Wmini[r, :] = W                                     # Updating W[i, :]
         Hmini[:, c] = H                                     # Updating H[:, j]
-        loss = Vmini[rowZ, colZ] - (Wmini.dot(Hmini)[rowZ, colZ])   
-        loss = dotProduct(loss) + lambdaValue * (dotProduct(Wmini) + dotProduct(Hmini)) # Computing the loss function
-        if np.fabs(prevLoss - loss) < 0.00001:              # If the loss between previous and current run is less than
-            break                                           # 1e-5 then break
-        else:                                               # else set the previous loss to current loss
-            prevLoss = loss
+        #loss = Vmini[rowZ, colZ] - (Wmini.dot(Hmini)[rowZ, colZ])   
+        #loss = dotProduct(loss) + lambdaValue * (dotProduct(Wmini) + dotProduct(Hmini)) # Computing the loss function
+        #if np.fabs(prevLoss - loss) < 0.0001:              # If the loss between previous and current run is less than
+         #   break                                           # 1e-5 then break
+        #else:                                               # else set the previous loss to current loss
+         #   prevLoss = loss
         iteration += 1
-        if iteration == 5000:                               # Maximum number of SGD iterations for each run
-            break                   
+        #if iteration == total:                               # Maximum number of SGD iterations for each run
+        #    break                   
     
     # Return the updated metadata
     return (Wmini, Hmini, blockEntryRow, blockExitRow, blockEntryCol, blockExitCol, globalIter + iteration)
@@ -103,9 +98,9 @@ def main():
     outputWPath = sys.argv[7]               # Output file for writing W factored matrix in csv format
     outputHPath = sys.argv[8]               # Output file for writing H factored matrix in csv format
     
-    conf = SparkConf().setAppName("DSGD").setMaster("local[{0}]".format(noOfWorkers))
+    conf = SparkConf().setAppName("DSGD")#.setMaster("local[{0}]".format(noOfWorkers))
     sc = SparkContext(conf=conf)
-    data, select = LoadSparseMatrix(inputPath)  # Loads the sparse matrix into the memory
+    data = LoadSparseMatrix(inputPath)  # Loads the sparse matrix into the memory
     noOfUsers = data.shape[0]
     noOfMovies = data.shape[1]
     remainRow, remainCol = noOfUsers%noOfWorkers, noOfMovies%noOfWorkers
@@ -118,24 +113,30 @@ def main():
     W = np.random.random_sample((noOfUsers, noOfFactors))   # Initialize W
     H = np.random.random_sample((noOfFactors, noOfMovies))  # Initialize H
    
+    stratumIndices = {}
+    for stratum in xrange(noOfWorkers):                     # Creating stratum
+        blocks = [] 
+        for worker in xrange(noOfWorkers):                  # Creating blocks in a stratum
+            blockEntryRow, blockExitRow = worker * blockSize[0], (worker + 1) * blockSize[0]
+            blockEntryCol, blockExitCol = (worker + stratum) * blockSize[1], (stratum + worker + 1) * blockSize[1]
+            if blockEntryCol > noOfMovies:
+                blockEntryCol = (blockEntryCol % noOfMovies) - 1
+                blockExitCol = blockEntryCol + blockSize[1]
+            if blockExitRow > noOfUsers:
+                blockExitRow = noOfUsers
+            if blockExitCol > noOfMovies:
+                blockExitCol = noOfMovies
+            blocks.append((blockEntryRow, blockExitRow, blockEntryCol, blockExitCol))
+        stratumIndices[stratum] = blocks
+   
     for iteration in xrange(noOfIterations):                # Number of times it goes through the training data
         globalIter = 0
 
         for stratum in xrange(noOfWorkers):                     # Creating stratum
             blocks = [] 
             for worker in xrange(noOfWorkers):                  # Creating blocks in a stratum
-                blockEntryRow, blockExitRow = worker * blockSize[0], (worker + 1) * blockSize[0]
-                blockEntryCol, blockExitCol = (worker + stratum) * blockSize[1], (stratum + worker + 1) * blockSize[1]
-                
-                if blockEntryCol > noOfMovies:
-                    blockEntryCol = (blockEntryCol % noOfMovies) - 1
-                blockExitCol = blockEntryCol + blockSize[1]
-                    
-                if blockExitRow > noOfUsers:
-                    blockExitRow = noOfUsers
-                if blockExitCol > noOfMovies:
-                    blockExitCol = noOfMovies
-                # Preparing chunks of data required for each block
+                block = stratumIndices[stratum][worker]
+                blockEntryRow, blockExitRow, blockEntryCol, blockExitCol = block[0], block[1], block[2], block[3]
                 Vmini = data[blockEntryRow:blockExitRow, blockEntryCol:blockExitCol]
                 Wmini = W[blockEntryRow:blockExitRow, :]
                 Hmini = H[:, blockEntryCol:blockExitCol]
@@ -148,7 +149,7 @@ def main():
                 W[blockEntryRow:blockExitRow, :] = r[0] # Updating W
                 H[:, blockEntryCol:blockExitCol] = r[1] # Updating H
 
-        #calculateMSE(iteration, W.dot(H), data, select)
+    #calculateMSE(iteration, W.dot(H), data, select)
 
     writeOutput(W, outputWPath)
     writeOutput(H, outputHPath)
