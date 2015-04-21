@@ -77,7 +77,18 @@ def calculateMSE(iteration, pred, V, select):
     for row, col in select:
         mse += diff[row, col] * diff[row, col]
     mseOut.write("Mean Squared Error: Iteration {0} {1}\n".format(iteration+1, mse/len(select)))
-       
+'''
+   Returns the loss computed after each iteration
+'''
+def calculateLoss(pred, V, select, W, H):
+    diff = V - pred
+    loss = 0.0
+    for row, col in select:
+        loss += diff[row, col] * diff[row, col]
+    loss = loss / len(select)
+    loss += dotProduct(W) + dotProduct(H)
+    return loss
+    
 def main():
     global betaValue, lambdaValue
     noOfFactors = int(sys.argv[1])          # Number of factors
@@ -119,7 +130,7 @@ def main():
                 blockExitCol = noOfMovies
             blocks.append((blockEntryRow, blockExitRow, blockEntryCol, blockExitCol))
         stratumIndices[stratum] = blocks
-   
+    prevLoss = -1.0
     for iteration in xrange(noOfIterations):                # Number of times it goes through the training data
         globalIter = 0
 
@@ -139,7 +150,11 @@ def main():
                 globalIter += r[6]      # Updating global iterations from each SGD
                 W[blockEntryRow:blockExitRow, :] = r[0] # Updating W
                 H[:, blockEntryCol:blockExitCol] = r[1] # Updating H
-
+	loss = calculateLoss(W.dot(H), data, select, W, H)
+    	if np.fabs(loss - prevLoss) < 0.00001:
+    		break
+    	else:
+    		prevLoss = loss
     #calculateMSE(iteration, W.dot(H), data, select)
 
     writeOutput(W, outputWPath)
